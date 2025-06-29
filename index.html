@@ -146,8 +146,8 @@
             color = 0x0D326E;
             emissive = 0x000022;
           } else {
-            color = 0xD4B400;
-            emissive = 0x665500;
+            color = 0xB8860B;
+            emissive = 0x5E4005;
           }
 
           const material = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: 0.3 });
@@ -167,7 +167,7 @@
           return mesh;
         })
         .linkWidth(4)
-        .linkColor(() => '#7B3F3F') // black edges here
+        .linkColor(() => '#444444') // black edges here
         .nodeLabel(node => node.id)
         .backgroundColor('#fff')
         .onNodeClick(node => {
