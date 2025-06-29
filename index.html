@@ -8,7 +8,7 @@
       margin: 0;
       height: 100%;
       overflow: hidden;
-      background-color: #111;
+      background-color: #ffffff; /* White background */
       font-family: Arial, sans-serif;
     }
 
@@ -24,8 +24,8 @@
       position: fixed;
       top: 20px;
       right: 20px;
-      background: rgba(0, 0, 0, 0.9);
-      border: 2px solid #C41230; /* Montclair Red border */
+      background: rgba(0, 0, 0, 0.85);
+      border: 2px solid #C41230;
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -55,12 +55,13 @@
       position: fixed;
       top: 20px;
       left: 20px;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
+      background: rgba(255, 255, 255, 0.95);
+      color: black;
       padding: 10px;
       border-radius: 6px;
       font-size: 13px;
       z-index: 9999;
+      box-shadow: 0 0 6px rgba(0,0,0,0.1);
     }
 
     .legend-color {
@@ -69,6 +70,15 @@
       height: 14px;
       margin-right: 6px;
       vertical-align: middle;
+    }
+
+    .node-label {
+      font-family: Arial, sans-serif;
+      font-size: 10px;
+      color: black;
+      font-weight: bold;
+      pointer-events: none;
+      user-select: none;
     }
   </style>
 </head>
@@ -103,13 +113,13 @@
         const activity = row.activity_name?.trim();
         if (!activity) return;
 
-        // Save activity info for popup
-        activityInfo[activity] = {
-          primary_contact: row.primary_contact || 'N/A',
-          primary_contact_email: row.primary_contact_email || 'N/A'
-        };
-
         if (!nodesMap[activity]) nodesMap[activity] = { id: activity, group: 'activity' };
+
+        // Store activity extra info for popup
+        activityInfo[activity] = {
+          primary_contact: row.primary_contact || '',
+          primary_contact_email: row.primary_contact_email || ''
+        };
 
         const campusList = row.campus_partners ? row.campus_partners.split(',').map(x => x.trim()) : [];
         const communityList = row.community_organizations ? row.community_organizations.split(',').map(x => x.trim()) : [];
@@ -140,7 +150,7 @@
         .graphData({ nodes, links })
         .nodeRelSize(5)
         .nodeThreeObject(node => {
-          const size = 6 + (node.count || 1) * 1.2;
+          const size = 6 + (node.count || 1) * 1.5;
           const color = node.group === 'campus' ? 0x1249C4 :
                         node.group === 'community' ? 0xC4A312 : 0xC41230;
           const geometry = new THREE.SphereGeometry(size, 16, 16);
@@ -149,24 +159,43 @@
             emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
             emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
           });
-          return new THREE.Mesh(geometry, material);
+
+          const mesh = new THREE.Mesh(geometry, material);
+
+          // Add label for campus and community nodes showing their count
+          if (node.group === 'campus' || node.group === 'community') {
+            const canvas = document.createElement('canvas');
+            const sizeLabel = 64;
+            canvas.width = sizeLabel;
+            canvas.height = sizeLabel;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 30px Arial';
+            ctx.fillStyle = 'black';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.count || '', sizeLabel / 2, sizeLabel / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter;
+            const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
+            const sprite = new THREE.Sprite(labelMaterial);
+            sprite.scale.set(12, 12, 1);
+            sprite.position.set(0, size + 6, 0); // position label above the node
+            mesh.add(sprite);
+          }
+
+          return mesh;
         })
         .nodeColor(node => {
           if (highlightedNodes.size === 0) {
             return node.group === 'campus' ? '#1249C4' :
                    node.group === 'community' ? '#C4A312' : '#C41230';
           }
-          return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
+          return highlightedNodes.has(node.id) ? '#FFFF00' : '#999999';
         })
-        .nodeLabel(node => {
-          if (node.group === 'campus' || node.group === 'community') {
-            return node.id;
-          }
-          return null;
-        })
-        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#555')
-        .linkWidth(link => highlightedLinks.has(link) ? 4 : 1)
-        .backgroundColor('#111')
+        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#001f4d') // thick dark blue
+        .linkWidth(link => highlightedLinks.has(link) ? 6 : 3)
+        .backgroundColor('#ffffff')
         .onNodeClick(node => {
           highlightedNodes.clear();
           highlightedLinks.clear();
@@ -174,28 +203,26 @@
           popup.style.display = 'block';
 
           if (node.group === 'activity') {
-            popupTitle.textContent = `Activity: ${node.id}`;
+            popupTitle.textContent = node.id;
             popupContent.innerHTML = `
-              <b>Primary Contact:</b> ${activityInfo[node.id].primary_contact} <br/>
-              <b>Email:</b> <a href="mailto:${activityInfo[node.id].primary_contact_email}" style="color:#C41230;">${activityInfo[node.id].primary_contact_email}</a>
+              <b>Primary Contact:</b> ${activityInfo[node.id]?.primary_contact || 'N/A'}<br>
+              <b>Email:</b> <a href="mailto:${activityInfo[node.id]?.primary_contact_email || ''}" style="color:#C41230;">${activityInfo[node.id]?.primary_contact_email || 'N/A'}</a>
             `;
           } else {
-            popupTitle.textContent = node.id + ' (' + 
-              (node.group === 'campus' ? 'Campus Partner' : 'Community Org') + ')';
-
+            popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Partner' : 'Community Org'})`;
             let related = nodeLinks[node.id] || [];
             popupContent.innerHTML = related.length
               ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
               : '<i>No connected activities</i>';
           }
 
-          // Zoom to node with less extreme distance
-          const dist = 250; // bigger = zoomed out more, smaller = zoomed in closer
+          // Reduced zoom distance to avoid going too close
+          const dist = 80;
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
             { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
             node,
-            1000
+            1500
           );
 
           highlightedNodes.add(node.id);
@@ -220,7 +247,7 @@
         });
 
       // Add lights
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       const directional = new THREE.DirectionalLight(0xffffff, 0.8);
       directional.position.set(1, 1, 1);
       Graph.scene().add(ambient);
@@ -230,5 +257,6 @@
       document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
     });
 </script>
+
 </body>
 </html>
