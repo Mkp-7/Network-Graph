@@ -18,6 +18,7 @@
       width: 100%;
       height: 100%;
       z-index: 0;
+      cursor: grab;
     }
 
     #popup {
@@ -25,7 +26,7 @@
       top: 20px;
       right: 20px;
       background: rgba(0, 0, 0, 0.85);
-      border: 2px solid #C41230;
+      border: 2px solid #8B0000; /* Dark Red border */
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -37,9 +38,9 @@
 
     #popup h3 {
       margin: 0 0 6px 0;
-      color: #C41230;
+      color: #8B0000; /* Dark Red */
       font-size: 16px;
-      border-bottom: 1px solid #C41230;
+      border-bottom: 1px solid #8B0000;
       padding-bottom: 4px;
     }
 
@@ -71,11 +72,6 @@
       margin-right: 6px;
       vertical-align: middle;
     }
-
-    /* Optional: cursor pointer on nodes */
-    #graph-container canvas {
-      cursor: grab;
-    }
   </style>
 </head>
 <body>
@@ -88,9 +84,9 @@
 </div>
 
 <div id="legend">
-  <div><span class="legend-color" style="background:#1249C4;"></span> Campus Partner</div>
-  <div><span class="legend-color" style="background:#C4A312;"></span> Community Org</div>
-  <div><span class="legend-color" style="background:#C41230;"></span> Activity</div>
+  <div><span class="legend-color" style="background:#8B0000;"></span> Activity (Dark Red)</div>
+  <div><span class="legend-color" style="background:#FFD700;"></span> Campus Partner (Yellow)</div>
+  <div><span class="legend-color" style="background:#1E90FF;"></span> Community Org (Blue)</div>
 </div>
 
 <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
@@ -103,7 +99,7 @@
   fetch('data.json')
     .then(res => res.json())
     .then(data => {
-      const nodesMap = {}, links = [], nodeLinks = {}, linked = {}, activityInfo = {};
+      const nodesMap = {}, links = [], nodeLinks = {}, activityInfo = {};
 
       data.forEach(row => {
         const activity = row.activity_name?.trim();
@@ -125,7 +121,6 @@
           nodesMap[partner].count++;
           links.push({ source: partner, target: activity });
           nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
-          linked[`${partner}|${activity}`] = true;
         });
 
         communityList.forEach(org => {
@@ -133,7 +128,6 @@
           nodesMap[org].count++;
           links.push({ source: org, target: activity });
           nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
-          linked[`${org}|${activity}`] = true;
         });
       });
 
@@ -142,30 +136,46 @@
       let highlightedNodes = new Set();
       let highlightedLinks = new Set();
 
-      // For animation: keep track of selected node mesh & scale
+      // Animation tracking
       let selectedNodeMesh = null;
       let scaleDirection = 1;
       const scaleMin = 1.1;
       const scaleMax = 1.4;
       const scaleSpeed = 0.01;
 
+      // Tooltip for hover labels
+      const hoverLabel = document.createElement('div');
+      hoverLabel.style.position = 'fixed';
+      hoverLabel.style.padding = '4px 8px';
+      hoverLabel.style.background = 'rgba(0,0,0,0.7)';
+      hoverLabel.style.color = 'white';
+      hoverLabel.style.borderRadius = '4px';
+      hoverLabel.style.pointerEvents = 'none';
+      hoverLabel.style.zIndex = 10000;
+      hoverLabel.style.display = 'none';
+      hoverLabel.style.fontSize = '12px';
+      document.body.appendChild(hoverLabel);
+
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
         .nodeRelSize(5)
         .nodeThreeObject(node => {
           const baseSize = 6 + (node.count || 1) * 1.5;
-          const color = node.group === 'campus' ? 0x1249C4 :
-                        node.group === 'community' ? 0xC4A312 : 0xC41230;
+          let color;
+          if (node.group === 'campus') color = 0xFFD700;      // Yellow
+          else if (node.group === 'community') color = 0x1E90FF; // DodgerBlue
+          else color = 0x8B0000;                               // DarkRed (activity)
+
           const geometry = new THREE.SphereGeometry(baseSize, 16, 16);
           const material = new THREE.MeshPhongMaterial({
             color,
             emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
-            emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
+            emissiveIntensity: highlightedNodes.has(node.id) ? 0.8 : 0
           });
 
           const mesh = new THREE.Mesh(geometry, material);
 
-          // Add label for campus and community nodes showing their count
+          // Label for campus and community nodes with count
           if (node.group === 'campus' || node.group === 'community') {
             const canvas = document.createElement('canvas');
             const sizeLabel = 64;
@@ -183,11 +193,11 @@
             const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
             const sprite = new THREE.Sprite(labelMaterial);
             sprite.scale.set(12, 12, 1);
-            sprite.position.set(0, baseSize + 6, 0); // position label above the node
+            sprite.position.set(0, baseSize + 6, 0);
             mesh.add(sprite);
           }
 
-          // For activity nodes, add label with activity name
+          // Label for activity nodes - name only
           if (node.group === 'activity') {
             const canvas = document.createElement('canvas');
             const sizeLabel = 256;
@@ -195,7 +205,7 @@
             canvas.height = 64;
             const ctx = canvas.getContext('2d');
             ctx.font = 'bold 32px Arial';
-            ctx.fillStyle = '#C41230';
+            ctx.fillStyle = '#8B0000'; // dark red
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(node.id, sizeLabel / 2, 32);
@@ -205,19 +215,20 @@
             const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
             const sprite = new THREE.Sprite(labelMaterial);
             sprite.scale.set(30, 7.5, 1);
-            sprite.position.set(0, baseSize + 8, 0); // position label above the node
+            sprite.position.set(0, baseSize + 8, 0);
             mesh.add(sprite);
           }
 
-          // Store mesh on node for animation use
+          // Save mesh reference for animation
           node.__threeObj = mesh;
 
           return mesh;
         })
         .nodeColor(node => {
           if (highlightedNodes.size === 0) {
-            return node.group === 'campus' ? '#1249C4' :
-                   node.group === 'community' ? '#C4A312' : '#C41230';
+            if (node.group === 'campus') return '#FFD700';
+            if (node.group === 'community') return '#1E90FF';
+            return '#8B0000';
           }
           return highlightedNodes.has(node.id) ? '#FFFF00' : '#999999';
         })
@@ -234,7 +245,7 @@
             popupTitle.textContent = node.id;
             popupContent.innerHTML = `
               <b>Primary Contact:</b> ${activityInfo[node.id]?.primary_contact || 'N/A'}<br>
-              <b>Email:</b> <a href="mailto:${activityInfo[node.id]?.primary_contact_email || ''}" style="color:#C41230;">${activityInfo[node.id]?.primary_contact_email || 'N/A'}</a>
+              <b>Email:</b> <a href="mailto:${activityInfo[node.id]?.primary_contact_email || ''}" style="color:#8B0000;">${activityInfo[node.id]?.primary_contact_email || 'N/A'}</a>
             `;
           } else {
             popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Partner' : 'Community Org'})`;
@@ -244,13 +255,13 @@
               : '<i>No connected activities</i>';
           }
 
-          // Reduced zoom distance
-          const dist = 80;
+          // Reduce zoom distance to subtle zoom
+          const dist = 30; // smaller distance
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
             { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
             node,
-            1500
+            1200
           );
 
           highlightedNodes.add(node.id);
@@ -268,11 +279,19 @@
 
           // Reset scale for previous selected node
           if (selectedNodeMesh && selectedNodeMesh !== node.__threeObj) {
-            selectedNodeMesh.scale.set(1,1,1);
+            selectedNodeMesh.scale.set(1, 1, 1);
           }
 
           selectedNodeMesh = node.__threeObj;
-          selectedNodeMesh.scale.set(scaleMin, scaleMin, scaleMin); // start smaller for pulse animation
+          selectedNodeMesh.scale.set(scaleMin, scaleMin, scaleMin); // start scale for pulse animation
+        })
+        .onNodeHover(node => {
+          if (node) {
+            hoverLabel.style.display = 'block';
+            hoverLabel.textContent = node.id;
+          } else {
+            hoverLabel.style.display = 'none';
+          }
         })
         .onBackgroundClick(() => {
           popup.style.display = 'none';
@@ -281,14 +300,22 @@
           Graph.nodeColor(Graph.nodeColor());
           Graph.linkColor(Graph.linkColor());
 
-          // Reset scale for selected node
           if (selectedNodeMesh) {
-            selectedNodeMesh.scale.set(1,1,1);
+            selectedNodeMesh.scale.set(1, 1, 1);
             selectedNodeMesh = null;
+          }
+        })
+        .onRenderFrame(() => {
+          if (hoverLabel.style.display === 'block') {
+            const mousePos = Graph.pointerPos();
+            if (mousePos) {
+              hoverLabel.style.left = (mousePos.x + 15) + 'px';
+              hoverLabel.style.top = (mousePos.y + 15) + 'px';
+            }
           }
         });
 
-      // Animation loop for pulsing selected node
+      // Pulsing animation loop for selected node
       (function animate() {
         requestAnimationFrame(animate);
         if (selectedNodeMesh) {
@@ -305,12 +332,13 @@
         }
       })();
 
-      // Add lights
+      // Lights
       const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       const directional = new THREE.DirectionalLight(0xffffff, 0.8);
       directional.position.set(1, 1, 1);
       Graph.scene().add(ambient);
       Graph.scene().add(directional);
+
     })
     .catch(err => {
       document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
