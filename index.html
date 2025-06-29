@@ -72,13 +72,9 @@
       vertical-align: middle;
     }
 
-    .node-label {
-      font-family: Arial, sans-serif;
-      font-size: 10px;
-      color: black;
-      font-weight: bold;
-      pointer-events: none;
-      user-select: none;
+    /* Optional: cursor pointer on nodes */
+    #graph-container canvas {
+      cursor: grab;
     }
   </style>
 </head>
@@ -146,14 +142,21 @@
       let highlightedNodes = new Set();
       let highlightedLinks = new Set();
 
+      // For animation: keep track of selected node mesh & scale
+      let selectedNodeMesh = null;
+      let scaleDirection = 1;
+      const scaleMin = 1.1;
+      const scaleMax = 1.4;
+      const scaleSpeed = 0.01;
+
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
         .nodeRelSize(5)
         .nodeThreeObject(node => {
-          const size = 6 + (node.count || 1) * 1.5;
+          const baseSize = 6 + (node.count || 1) * 1.5;
           const color = node.group === 'campus' ? 0x1249C4 :
                         node.group === 'community' ? 0xC4A312 : 0xC41230;
-          const geometry = new THREE.SphereGeometry(size, 16, 16);
+          const geometry = new THREE.SphereGeometry(baseSize, 16, 16);
           const material = new THREE.MeshPhongMaterial({
             color,
             emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
@@ -180,9 +183,34 @@
             const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
             const sprite = new THREE.Sprite(labelMaterial);
             sprite.scale.set(12, 12, 1);
-            sprite.position.set(0, size + 6, 0); // position label above the node
+            sprite.position.set(0, baseSize + 6, 0); // position label above the node
             mesh.add(sprite);
           }
+
+          // For activity nodes, add label with activity name
+          if (node.group === 'activity') {
+            const canvas = document.createElement('canvas');
+            const sizeLabel = 256;
+            canvas.width = sizeLabel;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 32px Arial';
+            ctx.fillStyle = '#C41230';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(node.id, sizeLabel / 2, 32);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter;
+            const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
+            const sprite = new THREE.Sprite(labelMaterial);
+            sprite.scale.set(30, 7.5, 1);
+            sprite.position.set(0, baseSize + 8, 0); // position label above the node
+            mesh.add(sprite);
+          }
+
+          // Store mesh on node for animation use
+          node.__threeObj = mesh;
 
           return mesh;
         })
@@ -216,7 +244,7 @@
               : '<i>No connected activities</i>';
           }
 
-          // Reduced zoom distance to avoid going too close
+          // Reduced zoom distance
           const dist = 80;
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
@@ -237,6 +265,14 @@
 
           Graph.nodeColor(Graph.nodeColor());
           Graph.linkColor(Graph.linkColor());
+
+          // Reset scale for previous selected node
+          if (selectedNodeMesh && selectedNodeMesh !== node.__threeObj) {
+            selectedNodeMesh.scale.set(1,1,1);
+          }
+
+          selectedNodeMesh = node.__threeObj;
+          selectedNodeMesh.scale.set(scaleMin, scaleMin, scaleMin); // start smaller for pulse animation
         })
         .onBackgroundClick(() => {
           popup.style.display = 'none';
@@ -244,7 +280,30 @@
           highlightedLinks.clear();
           Graph.nodeColor(Graph.nodeColor());
           Graph.linkColor(Graph.linkColor());
+
+          // Reset scale for selected node
+          if (selectedNodeMesh) {
+            selectedNodeMesh.scale.set(1,1,1);
+            selectedNodeMesh = null;
+          }
         });
+
+      // Animation loop for pulsing selected node
+      (function animate() {
+        requestAnimationFrame(animate);
+        if (selectedNodeMesh) {
+          let scale = selectedNodeMesh.scale.x;
+          scale += scaleDirection * scaleSpeed;
+          if (scale > scaleMax) {
+            scale = scaleMax;
+            scaleDirection = -1;
+          } else if (scale < scaleMin) {
+            scale = scaleMin;
+            scaleDirection = 1;
+          }
+          selectedNodeMesh.scale.set(scale, scale, scale);
+        }
+      })();
 
       // Add lights
       const ambient = new THREE.AmbientLight(0xffffff, 0.7);
