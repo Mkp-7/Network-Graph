@@ -11,7 +11,6 @@
       background-color: #111;
       font-family: Arial, sans-serif;
     }
-
     #graph-container {
       position: absolute;
       top: 0; left: 0;
@@ -19,13 +18,12 @@
       height: 100%;
       z-index: 0;
     }
-
     #popup {
       position: fixed;
       top: 20px;
       right: 20px;
       background: rgba(0, 0, 0, 0.9);
-      border: 2px solid #FF4444;
+      border: 2px solid #C41230;
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -34,15 +32,13 @@
       display: none;
       z-index: 9999;
     }
-
     #popup h3 {
       margin: 0 0 6px 0;
-      color: #FF5555;
+      color: #C41230;
       font-size: 16px;
-      border-bottom: 1px solid #FF0000;
+      border-bottom: 1px solid #C41230;
       padding-bottom: 4px;
     }
-
     #popup ul {
       margin: 5px 0 0 15px;
       padding: 0;
@@ -50,7 +46,6 @@
       max-height: 200px;
       overflow-y: auto;
     }
-
     #legend {
       position: fixed;
       top: 20px;
@@ -62,7 +57,6 @@
       font-size: 13px;
       z-index: 9999;
     }
-
     .legend-color {
       display: inline-block;
       width: 14px;
@@ -82,9 +76,9 @@
 </div>
 
 <div id="legend">
-  <div><span class="legend-color" style="background:#FF4444;"></span> Campus Partner</div>
-  <div><span class="legend-color" style="background:#33BBFF;"></span> Community Org</div>
-  <div><span class="legend-color" style="background:#AA66CC;"></span> Activity</div>
+  <div><span class="legend-color" style="background:#1249C4;"></span> Campus Partner</div>
+  <div><span class="legend-color" style="background:#C4A312;"></span> Community Org</div>
+  <div><span class="legend-color" style="background:#C41230;"></span> Activity</div>
 </div>
 
 <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
@@ -135,8 +129,8 @@
         .nodeRelSize(5)
         .nodeThreeObject(node => {
           const size = 6 + (node.count || 1) * 1.2;
-          const color = node.group === 'campus' ? 0xFF4444 :
-                        node.group === 'community' ? 0x33BBFF : 0xAA66CC;
+          const color = node.group === 'campus' ? 0x1249C4 :
+                        node.group === 'community' ? 0xC4A312 : 0xC41230;
           const geometry = new THREE.SphereGeometry(size, 16, 16);
           const material = new THREE.MeshPhongMaterial({
             color,
@@ -147,8 +141,8 @@
         })
         .nodeColor(node => {
           if (highlightedNodes.size === 0) {
-            return node.group === 'campus' ? '#FF4444' :
-                   node.group === 'community' ? '#33BBFF' : '#AA66CC';
+            return node.group === 'campus' ? '#1249C4' :
+                   node.group === 'community' ? '#C4A312' : '#C41230';
           }
           return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
         })
@@ -167,8 +161,8 @@
             ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
             : '<i>No connected activities</i>';
 
-          // Zoom to node
-          const dist = 200;
+          // Zoom to node — reduced zoom intensity by reducing dist from 200 to 80
+          const dist = 80;
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
             { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
