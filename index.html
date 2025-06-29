@@ -122,7 +122,6 @@
 
       const nodes = Object.values(nodesMap);
 
-      // Calculate max diameter of biggest campus partner node for link distance
       let maxCount = 0;
       nodes.forEach(node => {
         if(node.group === 'campus' && node.count > maxCount) maxCount = node.count;
@@ -130,7 +129,7 @@
 
       const maxSize = 6 + maxCount * 1.5;
       const maxDiameter = maxSize * 2;
-      const padding = 5;  // padding for edge length
+      const padding = 5;
 
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
@@ -141,14 +140,14 @@
 
           let color, emissive;
           if(node.group === 'campus') {
-            color = 0x8B0A20; // dark red
+            color = 0x8B0A20;
             emissive = 0x440000;
           } else if(node.group === 'community') {
-            color = 0x0D326E; // dark blue
+            color = 0x0D326E;
             emissive = 0x000022;
           } else {
-            color = 0xD4B400; // richer yellow/gold
-            emissive = 0x665500; // subtle yellow glow
+            color = 0xD4B400;
+            emissive = 0x665500;
           }
 
           const material = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: 0.3 });
@@ -168,7 +167,7 @@
           return mesh;
         })
         .linkWidth(4)
-        .linkColor(() => '#444444')
+        .linkColor(() => '#7B3F3F') // black edges here
         .nodeLabel(node => node.id)
         .backgroundColor('#fff')
         .onNodeClick(node => {
@@ -189,7 +188,6 @@
               : '<i>No connected activities</i>';
           }
 
-          // reduced zoom to just a bit closer to node
           const dist = 120;
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
