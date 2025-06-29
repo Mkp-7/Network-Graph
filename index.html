@@ -122,6 +122,16 @@
 
       const nodes = Object.values(nodesMap);
 
+      // Calculate max diameter of biggest campus partner node for link distance
+      let maxCount = 0;
+      nodes.forEach(node => {
+        if(node.group === 'campus' && node.count > maxCount) maxCount = node.count;
+      });
+
+      const maxSize = 6 + maxCount * 1.5;
+      const maxDiameter = maxSize * 2;
+      const padding = 5;  // padding for edge length
+
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
         .nodeRelSize(6)
@@ -192,7 +202,7 @@
           popup.style.display = 'none';
         });
 
-      Graph.d3Force('link').distance(150);
+      Graph.d3Force('link').distance(maxDiameter + padding);
 
       const ambient = new THREE.AmbientLight(0xffffff, 0.7);
       const directional = new THREE.DirectionalLight(0xffffff, 0.8);
