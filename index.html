@@ -8,7 +8,7 @@
       margin: 0;
       height: 100%;
       overflow: hidden;
-      background-color: #ffffff; /* White background */
+      background-color: #fff;
       font-family: Arial, sans-serif;
     }
 
@@ -18,15 +18,14 @@
       width: 100%;
       height: 100%;
       z-index: 0;
-      cursor: grab;
     }
 
     #popup {
       position: fixed;
       top: 20px;
       right: 20px;
-      background: rgba(0, 0, 0, 0.85);
-      border: 2px solid #8B0000; /* Dark Red border */
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid #8B0000;
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -38,7 +37,7 @@
 
     #popup h3 {
       margin: 0 0 6px 0;
-      color: #8B0000; /* Dark Red */
+      color: #C41230;
       font-size: 16px;
       border-bottom: 1px solid #8B0000;
       padding-bottom: 4px;
@@ -56,13 +55,12 @@
       position: fixed;
       top: 20px;
       left: 20px;
-      background: rgba(255, 255, 255, 0.95);
-      color: black;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
       padding: 10px;
       border-radius: 6px;
       font-size: 13px;
       z-index: 9999;
-      box-shadow: 0 0 6px rgba(0,0,0,0.1);
     }
 
     .legend-color {
@@ -71,6 +69,28 @@
       height: 14px;
       margin-right: 6px;
       vertical-align: middle;
+    }
+
+    #hover-label {
+      position: fixed;
+      pointer-events: none;
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      padding: 3px 7px;
+      border-radius: 4px;
+      font-size: 13px;
+      display: none;
+      z-index: 9999;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .node-label {
+      font-size: 12px;
+      color: #333;
+      pointer-events: none;
+      user-select: none;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -84,22 +104,26 @@
 </div>
 
 <div id="legend">
-  <div><span class="legend-color" style="background:#8B0000;"></span> Activity (Dark Red)</div>
-  <div><span class="legend-color" style="background:#FFD700;"></span> Campus Partner (Yellow)</div>
-  <div><span class="legend-color" style="background:#1E90FF;"></span> Community Org (Blue)</div>
+  <div><span class="legend-color" style="background:#8B0000;"></span> Campus Partner</div>
+  <div><span class="legend-color" style="background:#1249C4;"></span> Community Org</div>
+  <div><span class="legend-color" style="background:#C4A312;"></span> Activity</div>
 </div>
 
+<div id="hover-label"></div>
+
 <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
-<script src="https://unpkg.com/3d-force-graph"></script>
+<script src="https://unpkg.com/3d-force-graph@1.73.3/build/3d-force-graph.min.js"></script>
 <script>
   const popup = document.getElementById('popup');
   const popupTitle = document.getElementById('popup-title');
   const popupContent = document.getElementById('popup-content');
+  const hoverLabel = document.getElementById('hover-label');
 
   fetch('data.json')
     .then(res => res.json())
     .then(data => {
-      const nodesMap = {}, links = [], nodeLinks = {}, activityInfo = {};
+      const nodesMap = {}, links = [], nodeLinks = {}, linked = {};
+      const nodeExtraInfo = {}; // to hold contact info for activities
 
       data.forEach(row => {
         const activity = row.activity_name?.trim();
@@ -107,10 +131,10 @@
 
         if (!nodesMap[activity]) nodesMap[activity] = { id: activity, group: 'activity' };
 
-        // Store activity extra info for popup
-        activityInfo[activity] = {
-          primary_contact: row.primary_contact || '',
-          primary_contact_email: row.primary_contact_email || ''
+        // Store contact info for popup on activity node click
+        nodeExtraInfo[activity] = {
+          primary_contact: row.primary_contact || 'N/A',
+          primary_contact_email: row.primary_contact_email || 'N/A'
         };
 
         const campusList = row.campus_partners ? row.campus_partners.split(',').map(x => x.trim()) : [];
@@ -121,6 +145,7 @@
           nodesMap[partner].count++;
           links.push({ source: partner, target: activity });
           nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
+          linked[`${partner}|${activity}`] = true;
         });
 
         communityList.forEach(org => {
@@ -128,6 +153,7 @@
           nodesMap[org].count++;
           links.push({ source: org, target: activity });
           nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
+          linked[`${org}|${activity}`] = true;
         });
       });
 
@@ -136,132 +162,74 @@
       let highlightedNodes = new Set();
       let highlightedLinks = new Set();
 
-      // Animation tracking
-      let selectedNodeMesh = null;
-      let scaleDirection = 1;
-      const scaleMin = 1.1;
-      const scaleMax = 1.4;
-      const scaleSpeed = 0.01;
-
-      // Tooltip for hover labels
-      const hoverLabel = document.createElement('div');
-      hoverLabel.style.position = 'fixed';
-      hoverLabel.style.padding = '4px 8px';
-      hoverLabel.style.background = 'rgba(0,0,0,0.7)';
-      hoverLabel.style.color = 'white';
-      hoverLabel.style.borderRadius = '4px';
-      hoverLabel.style.pointerEvents = 'none';
-      hoverLabel.style.zIndex = 10000;
-      hoverLabel.style.display = 'none';
-      hoverLabel.style.fontSize = '12px';
-      document.body.appendChild(hoverLabel);
+      // To add labels on campus and community nodes
+      const labelsGroup = new THREE.Group();
 
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
         .nodeRelSize(5)
         .nodeThreeObject(node => {
-          const baseSize = 6 + (node.count || 1) * 1.5;
+          const size = 6 + (node.count || 1) * 1.2;
           let color;
-          if (node.group === 'campus') color = 0xFFD700;      // Yellow
-          else if (node.group === 'community') color = 0x1E90FF; // DodgerBlue
-          else color = 0x8B0000;                               // DarkRed (activity)
+          if(node.group === 'campus') color = 0x8B0000;         // dark red
+          else if(node.group === 'community') color = 0x1249C4; // blue
+          else color = 0xC4A312;                               // yellow
 
-          const geometry = new THREE.SphereGeometry(baseSize, 16, 16);
+          const geometry = new THREE.SphereGeometry(size, 16, 16);
           const material = new THREE.MeshPhongMaterial({
             color,
             emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
-            emissiveIntensity: highlightedNodes.has(node.id) ? 0.8 : 0
+            emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
           });
+          const sphere = new THREE.Mesh(geometry, material);
 
-          const mesh = new THREE.Mesh(geometry, material);
-
-          // Label for campus and community nodes with count
-          if (node.group === 'campus' || node.group === 'community') {
-            const canvas = document.createElement('canvas');
-            const sizeLabel = 64;
-            canvas.width = sizeLabel;
-            canvas.height = sizeLabel;
-            const ctx = canvas.getContext('2d');
-            ctx.font = 'bold 30px Arial';
-            ctx.fillStyle = 'black';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(node.count || '', sizeLabel / 2, sizeLabel / 2);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.minFilter = THREE.LinearFilter;
-            const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
-            const sprite = new THREE.Sprite(labelMaterial);
-            sprite.scale.set(12, 12, 1);
-            sprite.position.set(0, baseSize + 6, 0);
-            mesh.add(sprite);
+          // Add label only for campus and community nodes
+          if(node.group === 'campus' || node.group === 'community') {
+            const sprite = makeTextSprite(node.id, { fontsize: 24, borderColor: 'rgba(0,0,0,0)', backgroundColor: 'rgba(255,255,255,0)' });
+            sprite.position.set(0, size + 8, 0);
+            sphere.add(sprite);
           }
 
-          // Label for activity nodes - name only
-          if (node.group === 'activity') {
-            const canvas = document.createElement('canvas');
-            const sizeLabel = 256;
-            canvas.width = sizeLabel;
-            canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.font = 'bold 32px Arial';
-            ctx.fillStyle = '#8B0000'; // dark red
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(node.id, sizeLabel / 2, 32);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.minFilter = THREE.LinearFilter;
-            const labelMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
-            const sprite = new THREE.Sprite(labelMaterial);
-            sprite.scale.set(30, 7.5, 1);
-            sprite.position.set(0, baseSize + 8, 0);
-            mesh.add(sprite);
-          }
-
-          // Save mesh reference for animation
-          node.__threeObj = mesh;
-
-          return mesh;
+          return sphere;
         })
         .nodeColor(node => {
           if (highlightedNodes.size === 0) {
-            if (node.group === 'campus') return '#FFD700';
-            if (node.group === 'community') return '#1E90FF';
-            return '#8B0000';
+            if(node.group === 'campus') return '#8B0000';    // dark red
+            if(node.group === 'community') return '#1249C4'; // blue
+            return '#C4A312';                                // yellow
           }
-          return highlightedNodes.has(node.id) ? '#FFFF00' : '#999999';
+          return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
         })
-        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#001f4d') // thick dark blue
-        .linkWidth(link => highlightedLinks.has(link) ? 6 : 3)
-        .backgroundColor('#ffffff')
+        .linkColor(link => highlightedLinks.has(link) ? '#00008B' : '#001540')  // thick dark blue, highlight brighter
+        .linkWidth(link => highlightedLinks.has(link) ? 6 : 3)                 // thick edges
+        .backgroundColor('#fff')
         .onNodeClick(node => {
           highlightedNodes.clear();
           highlightedLinks.clear();
 
           popup.style.display = 'block';
 
-          if (node.group === 'activity') {
+          if(node.group === 'activity') {
             popupTitle.textContent = node.id;
             popupContent.innerHTML = `
-              <b>Primary Contact:</b> ${activityInfo[node.id]?.primary_contact || 'N/A'}<br>
-              <b>Email:</b> <a href="mailto:${activityInfo[node.id]?.primary_contact_email || ''}" style="color:#8B0000;">${activityInfo[node.id]?.primary_contact_email || 'N/A'}</a>
+              <b>Primary Contact:</b> ${nodeExtraInfo[node.id]?.primary_contact || 'N/A'}<br>
+              <b>Email:</b> ${nodeExtraInfo[node.id]?.primary_contact_email || 'N/A'}
             `;
           } else {
-            popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Partner' : 'Community Org'})`;
+            popupTitle.textContent = node.id + (node.group === 'campus' ? ' (Campus Partner)' : ' (Community Org)');
             let related = nodeLinks[node.id] || [];
             popupContent.innerHTML = related.length
               ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
               : '<i>No connected activities</i>';
           }
 
-          // Reduce zoom distance to subtle zoom
-          const dist = 30; // smaller distance
+          // Reduced zoom effect
+          const dist = 100;
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
             { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
             node,
-            1200
+            1000
           );
 
           highlightedNodes.add(node.id);
@@ -276,14 +244,6 @@
 
           Graph.nodeColor(Graph.nodeColor());
           Graph.linkColor(Graph.linkColor());
-
-          // Reset scale for previous selected node
-          if (selectedNodeMesh && selectedNodeMesh !== node.__threeObj) {
-            selectedNodeMesh.scale.set(1, 1, 1);
-          }
-
-          selectedNodeMesh = node.__threeObj;
-          selectedNodeMesh.scale.set(scaleMin, scaleMin, scaleMin); // start scale for pulse animation
         })
         .onNodeHover(node => {
           if (node) {
@@ -295,55 +255,88 @@
         })
         .onBackgroundClick(() => {
           popup.style.display = 'none';
+          hoverLabel.style.display = 'none';
           highlightedNodes.clear();
           highlightedLinks.clear();
           Graph.nodeColor(Graph.nodeColor());
           Graph.linkColor(Graph.linkColor());
-
-          if (selectedNodeMesh) {
-            selectedNodeMesh.scale.set(1, 1, 1);
-            selectedNodeMesh = null;
-          }
-        })
-        .onRenderFrame(() => {
-          if (hoverLabel.style.display === 'block') {
-            const mousePos = Graph.pointerPos();
-            if (mousePos) {
-              hoverLabel.style.left = (mousePos.x + 15) + 'px';
-              hoverLabel.style.top = (mousePos.y + 15) + 'px';
-            }
-          }
         });
 
-      // Pulsing animation loop for selected node
-      (function animate() {
-        requestAnimationFrame(animate);
-        if (selectedNodeMesh) {
-          let scale = selectedNodeMesh.scale.x;
-          scale += scaleDirection * scaleSpeed;
-          if (scale > scaleMax) {
-            scale = scaleMax;
-            scaleDirection = -1;
-          } else if (scale < scaleMin) {
-            scale = scaleMin;
-            scaleDirection = 1;
-          }
-          selectedNodeMesh.scale.set(scale, scale, scale);
+      // Move hover label with mouse
+      window.addEventListener('mousemove', (event) => {
+        if (hoverLabel.style.display === 'block') {
+          hoverLabel.style.left = (event.clientX + 15) + 'px';
+          hoverLabel.style.top = (event.clientY + 15) + 'px';
         }
-      })();
+      });
 
-      // Lights
-      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+      // Add lights
+      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
       const directional = new THREE.DirectionalLight(0xffffff, 0.8);
       directional.position.set(1, 1, 1);
       Graph.scene().add(ambient);
       Graph.scene().add(directional);
 
+      // Utility function to create sprite labels
+      function makeTextSprite(message, parameters) {
+        if (parameters === undefined) parameters = {};
+        var fontface = parameters.hasOwnProperty("fontface") ? parameters["fontface"] : "Arial";
+        var fontsize = parameters.hasOwnProperty("fontsize") ? parameters["fontsize"] : 18;
+        var borderThickness = parameters.hasOwnProperty("borderThickness") ? parameters["borderThickness"] : 4;
+        var borderColor = parameters.hasOwnProperty("borderColor") ? parameters["borderColor"] : {r:0, g:0, b:0, a:1.0};
+        var backgroundColor = parameters.hasOwnProperty("backgroundColor") ? parameters["backgroundColor"] : {r:255, g:255, b:255, a:1.0};
+
+        var canvas = document.createElement('canvas');
+        var context = canvas.getContext('2d');
+        context.font = fontsize + "px " + fontface;
+
+        // get size data (height depends only on font size)
+        var metrics = context.measureText(message);
+        var textWidth = metrics.width;
+
+        // background color
+        context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
+        // border color
+        context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
+
+        context.lineWidth = borderThickness;
+        // Round rectangle
+        roundRect(context, borderThickness/2, borderThickness/2, textWidth + borderThickness, fontsize * 1.4 + borderThickness, 6);
+
+        // text color
+        context.fillStyle = "rgba(0, 0, 0, 1.0)";
+        context.fillText(message, borderThickness, fontsize + borderThickness);
+
+        // canvas contents will be used for a texture
+        var texture = new THREE.Texture(canvas);
+        texture.needsUpdate = true;
+
+        var spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+        var sprite = new THREE.Sprite(spriteMaterial);
+        sprite.scale.set( textWidth / 10, fontsize / 10, 1.0 );
+        return sprite;
+      }
+
+      // function for rounded rectangles
+      function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
     })
     .catch(err => {
       document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
     });
 </script>
-
 </body>
 </html>
