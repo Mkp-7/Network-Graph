@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>3D Network Graph with Popup</title>
+  <title>3D Network Graph</title>
   <style>
-    body, html {
+    html, body {
       margin: 0;
-      padding: 0;
-      overflow: hidden;
-      font-family: Arial, sans-serif;
       height: 100%;
+      overflow: hidden;
+      background-color: #111;
+      font-family: Arial, sans-serif;
     }
 
     #graph-container {
@@ -23,9 +23,9 @@
     #popup {
       position: fixed;
       top: 20px;
-      left: 20px;
-      background: black;
-      border: 2px solid red;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid #FF4444;
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -37,9 +37,9 @@
 
     #popup h3 {
       margin: 0 0 6px 0;
-      color: red;
+      color: #FF5555;
       font-size: 16px;
-      border-bottom: 1px solid red;
+      border-bottom: 1px solid #FF0000;
       padding-bottom: 4px;
     }
 
@@ -51,21 +51,10 @@
       overflow-y: auto;
     }
 
-    #popup button {
-      margin-top: 10px;
-      padding: 5px 10px;
-      background: red;
-      border: none;
-      border-radius: 4px;
-      color: white;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
     #legend {
       position: fixed;
       top: 20px;
-      right: 20px;
+      left: 20px;
       background: rgba(0, 0, 0, 0.85);
       color: white;
       padding: 10px;
@@ -90,13 +79,12 @@
 <div id="popup">
   <h3 id="popup-title"></h3>
   <div id="popup-content"></div>
-  <button onclick="popup.style.display='none'">Close</button>
 </div>
 
 <div id="legend">
-  <div><span class="legend-color" style="background:#FF6600;"></span> Campus Partner</div>
-  <div><span class="legend-color" style="background:#0099CC;"></span> Community Org</div>
-  <div><span class="legend-color" style="background:#990000;"></span> Activity</div>
+  <div><span class="legend-color" style="background:#FF4444;"></span> Campus Partner</div>
+  <div><span class="legend-color" style="background:#33BBFF;"></span> Community Org</div>
+  <div><span class="legend-color" style="background:#AA66CC;"></span> Activity</div>
 </div>
 
 <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
@@ -109,7 +97,7 @@
   fetch('data.json')
     .then(res => res.json())
     .then(data => {
-      const nodesMap = {}, links = [], nodeLinks = {};
+      const nodesMap = {}, links = [], nodeLinks = {}, linked = {};
 
       data.forEach(row => {
         const activity = row.activity_name?.trim();
@@ -125,6 +113,7 @@
           nodesMap[partner].count++;
           links.push({ source: partner, target: activity });
           nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
+          linked[`${partner}|${activity}`] = true;
         });
 
         communityList.forEach(org => {
@@ -132,41 +121,86 @@
           nodesMap[org].count++;
           links.push({ source: org, target: activity });
           nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
+          linked[`${org}|${activity}`] = true;
         });
       });
 
       const nodes = Object.values(nodesMap);
 
+      let highlightedNodes = new Set();
+      let highlightedLinks = new Set();
+
       const Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
-        .nodeRelSize(6)
+        .nodeRelSize(5)
         .nodeThreeObject(node => {
-          const size = 5 + (node.count || 1) * 1.2;
+          const size = 6 + (node.count || 1) * 1.2;
+          const color = node.group === 'campus' ? 0xFF4444 :
+                        node.group === 'community' ? 0x33BBFF : 0xAA66CC;
           const geometry = new THREE.SphereGeometry(size, 16, 16);
-          const color = node.group === 'campus' ? 0xFF6600 :
-                        node.group === 'community' ? 0x0099CC : 0x990000;
-          const material = new THREE.MeshPhongMaterial({ color });
+          const material = new THREE.MeshPhongMaterial({
+            color,
+            emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
+            emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
+          });
           return new THREE.Mesh(geometry, material);
         })
-        .linkWidth(3)
-        .linkColor(() => '#00008B')
-        .backgroundColor('#ffffff')
+        .nodeColor(node => {
+          if (highlightedNodes.size === 0) {
+            return node.group === 'campus' ? '#FF4444' :
+                   node.group === 'community' ? '#33BBFF' : '#AA66CC';
+          }
+          return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
+        })
+        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#333')
+        .linkWidth(link => highlightedLinks.has(link) ? 4 : 1)
+        .backgroundColor('#111')
         .onNodeClick(node => {
-          if (node.group === 'activity') return;
-          const related = nodeLinks[node.id] || [];
-          const html = related.length
+          highlightedNodes.clear();
+          highlightedLinks.clear();
+
+          popup.style.display = 'block';
+          popupTitle.textContent = node.id + ' (' + (node.group === 'campus' ? 'Campus Partner' : node.group === 'community' ? 'Community Org' : 'Activity') + ')';
+
+          let related = nodeLinks[node.id] || [];
+          popupContent.innerHTML = related.length
             ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
             : '<i>No connected activities</i>';
-          popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Partner' : 'Community Organization'})`;
-          popupContent.innerHTML = html;
-          popup.style.display = 'block';
-        })
-        .onBackgroundClick(() => popup.style.display = 'none');
 
+          // Zoom to node
+          const dist = 200;
+          const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
+          Graph.cameraPosition(
+            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+            node,
+            1500
+          );
+
+          highlightedNodes.add(node.id);
+
+          links.forEach(link => {
+            if (link.source.id === node.id || link.target.id === node.id) {
+              highlightedLinks.add(link);
+              highlightedNodes.add(link.source.id);
+              highlightedNodes.add(link.target.id);
+            }
+          });
+
+          Graph.nodeColor(Graph.nodeColor());
+          Graph.linkColor(Graph.linkColor());
+        })
+        .onBackgroundClick(() => {
+          popup.style.display = 'none';
+          highlightedNodes.clear();
+          highlightedLinks.clear();
+          Graph.nodeColor(Graph.nodeColor());
+          Graph.linkColor(Graph.linkColor());
+        });
+
+      // Add lights
       const ambient = new THREE.AmbientLight(0xffffff, 0.6);
       const directional = new THREE.DirectionalLight(0xffffff, 0.8);
       directional.position.set(1, 1, 1);
-
       Graph.scene().add(ambient);
       Graph.scene().add(directional);
     })
