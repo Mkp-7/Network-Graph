@@ -5,27 +5,19 @@
   <title>3D Network Graph</title>
   <style>
     html, body {
-      margin: 0;
-      height: 100%;
-      overflow: hidden;
+      margin: 0; height: 100%; overflow: hidden;
       background-color: #fff;
       font-family: Arial, sans-serif;
     }
-
     #graph-container {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; z-index: 0;
     }
-
     #popup {
       position: fixed;
-      top: 20px;
-      right: 20px;
+      top: 20px; right: 20px;
       background: rgba(0, 0, 0, 0.9);
-      border: 2px solid #8B0000;
+      border: 2px solid #800000;
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -34,15 +26,13 @@
       display: none;
       z-index: 9999;
     }
-
     #popup h3 {
       margin: 0 0 6px 0;
-      color: #C41230;
+      color: #800000;
       font-size: 16px;
-      border-bottom: 1px solid #8B0000;
+      border-bottom: 1px solid #800000;
       padding-bottom: 4px;
     }
-
     #popup ul {
       margin: 5px 0 0 15px;
       padding: 0;
@@ -50,11 +40,9 @@
       max-height: 200px;
       overflow-y: auto;
     }
-
     #legend {
       position: fixed;
-      top: 20px;
-      left: 20px;
+      top: 20px; left: 20px;
       background: rgba(0, 0, 0, 0.85);
       color: white;
       padding: 10px;
@@ -62,281 +50,204 @@
       font-size: 13px;
       z-index: 9999;
     }
-
     .legend-color {
       display: inline-block;
-      width: 14px;
-      height: 14px;
+      width: 14px; height: 14px;
       margin-right: 6px;
       vertical-align: middle;
-    }
-
-    #hover-label {
-      position: fixed;
-      pointer-events: none;
-      background: rgba(0,0,0,0.75);
-      color: #fff;
-      padding: 3px 7px;
-      border-radius: 4px;
-      font-size: 13px;
-      display: none;
-      z-index: 9999;
-      user-select: none;
-      white-space: nowrap;
-    }
-
-    .node-label {
-      font-size: 12px;
-      color: #333;
-      pointer-events: none;
-      user-select: none;
-      font-weight: bold;
     }
   </style>
 </head>
 <body>
+  <div id="graph-container"></div>
 
-<div id="graph-container"></div>
+  <div id="popup">
+    <h3 id="popup-title"></h3>
+    <div id="popup-content"></div>
+  </div>
 
-<div id="popup">
-  <h3 id="popup-title"></h3>
-  <div id="popup-content"></div>
-</div>
+  <div id="legend">
+    <div><span class="legend-color" style="background:#800000;"></span> Campus Partner</div>
+    <div><span class="legend-color" style="background:#1249C4;"></span> Community Org</div>
+    <div><span class="legend-color" style="background:#C4A312;"></span> Activity</div>
+  </div>
 
-<div id="legend">
-  <div><span class="legend-color" style="background:#8B0000;"></span> Campus Partner</div>
-  <div><span class="legend-color" style="background:#1249C4;"></span> Community Org</div>
-  <div><span class="legend-color" style="background:#C4A312;"></span> Activity</div>
-</div>
+  <script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
+  <script src="https://unpkg.com/3d-force-graph"></script>
+  <script>
+    const popup = document.getElementById('popup');
+    const popupTitle = document.getElementById('popup-title');
+    const popupContent = document.getElementById('popup-content');
 
-<div id="hover-label"></div>
+    fetch('data.json')
+      .then(res => res.json())
+      .then(data => {
+        const nodesMap = {}, links = [], nodeLinks = {}, linked = {};
 
-<script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
-<script src="https://unpkg.com/3d-force-graph@1.73.3/build/3d-force-graph.min.js"></script>
-<script>
-  const popup = document.getElementById('popup');
-  const popupTitle = document.getElementById('popup-title');
-  const popupContent = document.getElementById('popup-content');
-  const hoverLabel = document.getElementById('hover-label');
+        data.forEach(row => {
+          const activity = row.activity_name?.trim();
+          if (!activity) return;
 
-  fetch('data.json')
-    .then(res => res.json())
-    .then(data => {
-      const nodesMap = {}, links = [], nodeLinks = {}, linked = {};
-      const nodeExtraInfo = {}; // to hold contact info for activities
+          if (!nodesMap[activity]) nodesMap[activity] = { id: activity, group: 'activity' };
 
-      data.forEach(row => {
-        const activity = row.activity_name?.trim();
-        if (!activity) return;
+          const campusList = row.campus_partners ? row.campus_partners.split(',').map(x => x.trim()) : [];
+          const communityList = row.community_organizations ? row.community_organizations.split(',').map(x => x.trim()) : [];
 
-        if (!nodesMap[activity]) nodesMap[activity] = { id: activity, group: 'activity' };
-
-        // Store contact info for popup on activity node click
-        nodeExtraInfo[activity] = {
-          primary_contact: row.primary_contact || 'N/A',
-          primary_contact_email: row.primary_contact_email || 'N/A'
-        };
-
-        const campusList = row.campus_partners ? row.campus_partners.split(',').map(x => x.trim()) : [];
-        const communityList = row.community_organizations ? row.community_organizations.split(',').map(x => x.trim()) : [];
-
-        campusList.forEach(partner => {
-          if (!nodesMap[partner]) nodesMap[partner] = { id: partner, group: 'campus', count: 0 };
-          nodesMap[partner].count++;
-          links.push({ source: partner, target: activity });
-          nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
-          linked[`${partner}|${activity}`] = true;
-        });
-
-        communityList.forEach(org => {
-          if (!nodesMap[org]) nodesMap[org] = { id: org, group: 'community', count: 0 };
-          nodesMap[org].count++;
-          links.push({ source: org, target: activity });
-          nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
-          linked[`${org}|${activity}`] = true;
-        });
-      });
-
-      const nodes = Object.values(nodesMap);
-
-      let highlightedNodes = new Set();
-      let highlightedLinks = new Set();
-
-      // To add labels on campus and community nodes
-      const labelsGroup = new THREE.Group();
-
-      const Graph = ForceGraph3D()(document.getElementById('graph-container'))
-        .graphData({ nodes, links })
-        .nodeRelSize(5)
-        .nodeThreeObject(node => {
-          const size = 6 + (node.count || 1) * 1.2;
-          let color;
-          if(node.group === 'campus') color = 0x8B0000;         // dark red
-          else if(node.group === 'community') color = 0x1249C4; // blue
-          else color = 0xC4A312;                               // yellow
-
-          const geometry = new THREE.SphereGeometry(size, 16, 16);
-          const material = new THREE.MeshPhongMaterial({
-            color,
-            emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
-            emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
+          campusList.forEach(partner => {
+            if (!nodesMap[partner]) nodesMap[partner] = { id: partner, group: 'campus', count: 0 };
+            nodesMap[partner].count++;
+            links.push({ source: partner, target: activity });
+            nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
+            linked[`${partner}|${activity}`] = true;
           });
-          const sphere = new THREE.Mesh(geometry, material);
 
-          // Add label only for campus and community nodes
-          if(node.group === 'campus' || node.group === 'community') {
-            const sprite = makeTextSprite(node.id, { fontsize: 24, borderColor: 'rgba(0,0,0,0)', backgroundColor: 'rgba(255,255,255,0)' });
-            sprite.position.set(0, size + 8, 0);
-            sphere.add(sprite);
-          }
+          communityList.forEach(org => {
+            if (!nodesMap[org]) nodesMap[org] = { id: org, group: 'community', count: 0 };
+            nodesMap[org].count++;
+            links.push({ source: org, target: activity });
+            nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
+            linked[`${org}|${activity}`] = true;
+          });
+        });
 
-          return sphere;
-        })
-        .nodeColor(node => {
-          if (highlightedNodes.size === 0) {
-            if(node.group === 'campus') return '#8B0000';    // dark red
-            if(node.group === 'community') return '#1249C4'; // blue
-            return '#C4A312';                                // yellow
-          }
-          return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
-        })
-        .linkColor(link => highlightedLinks.has(link) ? '#00008B' : '#001540')  // thick dark blue, highlight brighter
-        .linkWidth(link => highlightedLinks.has(link) ? 6 : 3)                 // thick edges
-        .backgroundColor('#fff')
-        .onNodeClick(node => {
-          highlightedNodes.clear();
-          highlightedLinks.clear();
+        const nodes = Object.values(nodesMap);
 
-          popup.style.display = 'block';
+        let highlightedNodes = new Set();
+        let highlightedLinks = new Set();
+        let lastClickedNode = null;
 
-          if(node.group === 'activity') {
-            popupTitle.textContent = node.id;
-            popupContent.innerHTML = `
-              <b>Primary Contact:</b> ${nodeExtraInfo[node.id]?.primary_contact || 'N/A'}<br>
-              <b>Email:</b> ${nodeExtraInfo[node.id]?.primary_contact_email || 'N/A'}
-            `;
-          } else {
-            popupTitle.textContent = node.id + (node.group === 'campus' ? ' (Campus Partner)' : ' (Community Org)');
-            let related = nodeLinks[node.id] || [];
-            popupContent.innerHTML = related.length
-              ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
-              : '<i>No connected activities</i>';
-          }
+        const Graph = ForceGraph3D()(document.getElementById('graph-container'))
+          .graphData({ nodes, links })
+          .nodeRelSize(5)
+          .nodeThreeObject(node => {
+            const sizeBase = 6 + (node.count || 1) * 1.2;
+            // Animate clicked node pulsing
+            const scale = (lastClickedNode === node) ? 1 + 0.3 * Math.sin(Date.now() / 300) : 1;
 
-          // Reduced zoom effect
-          const dist = 100;
-          const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
-          Graph.cameraPosition(
-            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-            node,
-            1000
-          );
+            const geometry = new THREE.SphereGeometry(sizeBase * scale, 16, 16);
+            let color;
+            if (node.group === 'campus') color = 0x800000;       // Dark red
+            else if (node.group === 'community') color = 0x1249C4; // Dark blue
+            else color = 0xC4A312;                              // Mustard yellow
 
-          highlightedNodes.add(node.id);
+            const material = new THREE.MeshPhongMaterial({
+              color,
+              emissive: highlightedNodes.has(node.id) ? 0xFFFF00 : 0x000000,
+              emissiveIntensity: highlightedNodes.has(node.id) ? 0.6 : 0
+            });
 
-          links.forEach(link => {
-            if (link.source.id === node.id || link.target.id === node.id) {
-              highlightedLinks.add(link);
-              highlightedNodes.add(link.source.id);
-              highlightedNodes.add(link.target.id);
+            const mesh = new THREE.Mesh(geometry, material);
+
+            // Add label only for campus and community partner nodes
+            if (node.group !== 'activity') {
+              const canvas = document.createElement('canvas');
+              const size = 256;
+              canvas.width = size;
+              canvas.height = 64;
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = 'white';
+              ctx.font = '24px Arial';
+              ctx.textAlign = 'center';
+              ctx.fillText(`${node.id} (${node.count})`, size/2, 40);
+
+              const texture = new THREE.CanvasTexture(canvas);
+              texture.minFilter = THREE.LinearFilter;
+
+              const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+              const sprite = new THREE.Sprite(spriteMaterial);
+              sprite.position.set(0, sizeBase + 5, 0);
+              sprite.scale.set(20, 5, 1);
+              mesh.add(sprite);
+            }
+
+            return mesh;
+          })
+          .nodeColor(node => {
+            if (highlightedNodes.size === 0) {
+              if (node.group === 'campus') return '#800000';
+              if (node.group === 'community') return '#1249C4';
+              return '#C4A312';
+            }
+            return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
+          })
+          .linkColor(link => highlightedLinks.has(link) ? '#00008B' : '#000044')
+          .linkWidth(link => highlightedLinks.has(link) ? 6 : 3)
+          .backgroundColor('#fff')
+          .onNodeHover(node => {
+            if (node) Graph.nodeLabel(node.id);
+          })
+          .onNodeClick(node => {
+            highlightedNodes.clear();
+            highlightedLinks.clear();
+            lastClickedNode = node;
+
+            popup.style.display = 'block';
+            if (node.group === 'activity') {
+              // Show activity info with primary contact and email
+              const matchedRows = data.filter(r => r.activity_name?.trim() === node.id);
+              if (matchedRows.length > 0) {
+                const contact = matchedRows[0].primary_contact || 'N/A';
+                const email = matchedRows[0].primary_contact_email || 'N/A';
+                popupTitle.textContent = node.id + ' (Activity)';
+                popupContent.innerHTML = `<b>Primary Contact:</b> ${contact}<br><b>Email:</b> ${email}`;
+              } else {
+                popupTitle.textContent = node.id + ' (Activity)';
+                popupContent.innerHTML = '<i>No contact info available</i>';
+              }
+            } else {
+              popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Partner' : 'Community Org'})`;
+              const related = nodeLinks[node.id] || [];
+              popupContent.innerHTML = related.length
+                ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
+                : '<i>No connected activities</i>';
+            }
+
+            // Zoom just a bit closer (reduce zoom amount)
+            const dist = 150;
+            const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
+            Graph.cameraPosition(
+              { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+              node,
+              1500
+            );
+
+            highlightedNodes.add(node.id);
+
+            links.forEach(link => {
+              if (link.source.id === node.id || link.target.id === node.id) {
+                highlightedLinks.add(link);
+                highlightedNodes.add(link.source.id);
+                highlightedNodes.add(link.target.id);
+              }
+            });
+
+            Graph.nodeColor(Graph.nodeColor());
+            Graph.linkColor(Graph.linkColor());
+          })
+          .onBackgroundClick(() => {
+            popup.style.display = 'none';
+            highlightedNodes.clear();
+            highlightedLinks.clear();
+            lastClickedNode = null;
+            Graph.nodeColor(Graph.nodeColor());
+            Graph.linkColor(Graph.linkColor());
+          })
+          .onRenderFrame(() => {
+            if (lastClickedNode) {
+              Graph.nodeThreeObject(); // triggers re-render for animation
             }
           });
 
-          Graph.nodeColor(Graph.nodeColor());
-          Graph.linkColor(Graph.linkColor());
-        })
-        .onNodeHover(node => {
-          if (node) {
-            hoverLabel.style.display = 'block';
-            hoverLabel.textContent = node.id;
-          } else {
-            hoverLabel.style.display = 'none';
-          }
-        })
-        .onBackgroundClick(() => {
-          popup.style.display = 'none';
-          hoverLabel.style.display = 'none';
-          highlightedNodes.clear();
-          highlightedLinks.clear();
-          Graph.nodeColor(Graph.nodeColor());
-          Graph.linkColor(Graph.linkColor());
-        });
-
-      // Move hover label with mouse
-      window.addEventListener('mousemove', (event) => {
-        if (hoverLabel.style.display === 'block') {
-          hoverLabel.style.left = (event.clientX + 15) + 'px';
-          hoverLabel.style.top = (event.clientY + 15) + 'px';
-        }
+        // Add lights
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+        directional.position.set(1, 1, 1);
+        Graph.scene().add(ambient);
+        Graph.scene().add(directional);
+      })
+      .catch(err => {
+        document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
       });
-
-      // Add lights
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-      const directional = new THREE.DirectionalLight(0xffffff, 0.8);
-      directional.position.set(1, 1, 1);
-      Graph.scene().add(ambient);
-      Graph.scene().add(directional);
-
-      // Utility function to create sprite labels
-      function makeTextSprite(message, parameters) {
-        if (parameters === undefined) parameters = {};
-        var fontface = parameters.hasOwnProperty("fontface") ? parameters["fontface"] : "Arial";
-        var fontsize = parameters.hasOwnProperty("fontsize") ? parameters["fontsize"] : 18;
-        var borderThickness = parameters.hasOwnProperty("borderThickness") ? parameters["borderThickness"] : 4;
-        var borderColor = parameters.hasOwnProperty("borderColor") ? parameters["borderColor"] : {r:0, g:0, b:0, a:1.0};
-        var backgroundColor = parameters.hasOwnProperty("backgroundColor") ? parameters["backgroundColor"] : {r:255, g:255, b:255, a:1.0};
-
-        var canvas = document.createElement('canvas');
-        var context = canvas.getContext('2d');
-        context.font = fontsize + "px " + fontface;
-
-        // get size data (height depends only on font size)
-        var metrics = context.measureText(message);
-        var textWidth = metrics.width;
-
-        // background color
-        context.fillStyle = `rgba(${backgroundColor.r},${backgroundColor.g},${backgroundColor.b},${backgroundColor.a})`;
-        // border color
-        context.strokeStyle = `rgba(${borderColor.r},${borderColor.g},${borderColor.b},${borderColor.a})`;
-
-        context.lineWidth = borderThickness;
-        // Round rectangle
-        roundRect(context, borderThickness/2, borderThickness/2, textWidth + borderThickness, fontsize * 1.4 + borderThickness, 6);
-
-        // text color
-        context.fillStyle = "rgba(0, 0, 0, 1.0)";
-        context.fillText(message, borderThickness, fontsize + borderThickness);
-
-        // canvas contents will be used for a texture
-        var texture = new THREE.Texture(canvas);
-        texture.needsUpdate = true;
-
-        var spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-        var sprite = new THREE.Sprite(spriteMaterial);
-        sprite.scale.set( textWidth / 10, fontsize / 10, 1.0 );
-        return sprite;
-      }
-
-      // function for rounded rectangles
-      function roundRect(ctx, x, y, w, h, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-        ctx.lineTo(x + r, y + h);
-        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      }
-    })
-    .catch(err => {
-      document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
-    });
-</script>
+  </script>
 </body>
 </html>
