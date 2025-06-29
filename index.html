@@ -11,6 +11,7 @@
       background-color: #111;
       font-family: Arial, sans-serif;
     }
+
     #graph-container {
       position: absolute;
       top: 0; left: 0;
@@ -18,12 +19,13 @@
       height: 100%;
       z-index: 0;
     }
+
     #popup {
       position: fixed;
       top: 20px;
       right: 20px;
       background: rgba(0, 0, 0, 0.9);
-      border: 2px solid #C41230;
+      border: 2px solid #C41230; /* Montclair Red border */
       border-radius: 8px;
       color: white;
       padding: 12px;
@@ -32,6 +34,7 @@
       display: none;
       z-index: 9999;
     }
+
     #popup h3 {
       margin: 0 0 6px 0;
       color: #C41230;
@@ -39,6 +42,7 @@
       border-bottom: 1px solid #C41230;
       padding-bottom: 4px;
     }
+
     #popup ul {
       margin: 5px 0 0 15px;
       padding: 0;
@@ -46,6 +50,7 @@
       max-height: 200px;
       overflow-y: auto;
     }
+
     #legend {
       position: fixed;
       top: 20px;
@@ -57,6 +62,7 @@
       font-size: 13px;
       z-index: 9999;
     }
+
     .legend-color {
       display: inline-block;
       width: 14px;
@@ -91,11 +97,17 @@
   fetch('data.json')
     .then(res => res.json())
     .then(data => {
-      const nodesMap = {}, links = [], nodeLinks = {}, linked = {};
+      const nodesMap = {}, links = [], nodeLinks = {}, linked = {}, activityInfo = {};
 
       data.forEach(row => {
         const activity = row.activity_name?.trim();
         if (!activity) return;
+
+        // Save activity info for popup
+        activityInfo[activity] = {
+          primary_contact: row.primary_contact || 'N/A',
+          primary_contact_email: row.primary_contact_email || 'N/A'
+        };
 
         if (!nodesMap[activity]) nodesMap[activity] = { id: activity, group: 'activity' };
 
@@ -146,7 +158,13 @@
           }
           return highlightedNodes.has(node.id) ? '#FFFF00' : '#444';
         })
-        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#333')
+        .nodeLabel(node => {
+          if (node.group === 'campus' || node.group === 'community') {
+            return node.id;
+          }
+          return null;
+        })
+        .linkColor(link => highlightedLinks.has(link) ? '#FFFF00' : '#555')
         .linkWidth(link => highlightedLinks.has(link) ? 4 : 1)
         .backgroundColor('#111')
         .onNodeClick(node => {
@@ -154,20 +172,30 @@
           highlightedLinks.clear();
 
           popup.style.display = 'block';
-          popupTitle.textContent = node.id + ' (' + (node.group === 'campus' ? 'Campus Partner' : node.group === 'community' ? 'Community Org' : 'Activity') + ')';
 
-          let related = nodeLinks[node.id] || [];
-          popupContent.innerHTML = related.length
-            ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
-            : '<i>No connected activities</i>';
+          if (node.group === 'activity') {
+            popupTitle.textContent = `Activity: ${node.id}`;
+            popupContent.innerHTML = `
+              <b>Primary Contact:</b> ${activityInfo[node.id].primary_contact} <br/>
+              <b>Email:</b> <a href="mailto:${activityInfo[node.id].primary_contact_email}" style="color:#C41230;">${activityInfo[node.id].primary_contact_email}</a>
+            `;
+          } else {
+            popupTitle.textContent = node.id + ' (' + 
+              (node.group === 'campus' ? 'Campus Partner' : 'Community Org') + ')';
 
-          // Zoom to node — reduced zoom intensity by reducing dist from 200 to 80
-          const dist = 80;
+            let related = nodeLinks[node.id] || [];
+            popupContent.innerHTML = related.length
+              ? '<ul>' + [...new Set(related)].map(a => `<li>${a}</li>`).join('') + '</ul>'
+              : '<i>No connected activities</i>';
+          }
+
+          // Zoom to node with less extreme distance
+          const dist = 250; // bigger = zoomed out more, smaller = zoomed in closer
           const distRatio = 1 + dist / Math.hypot(node.x, node.y, node.z);
           Graph.cameraPosition(
             { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
             node,
-            1500
+            1000
           );
 
           highlightedNodes.add(node.id);
