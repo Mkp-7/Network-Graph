@@ -110,7 +110,7 @@
   const countCommunity = document.getElementById('count-community');
   const countActivities = document.getElementById('count-activities');
 
-  let highlightedNode = null;
+  let fullNodes = [], fullLinks = [];
 
   fetch('data.json')
     .then(res => res.json())
@@ -151,11 +151,15 @@
       });
 
       const nodes = Object.values(nodesMap);
+      fullNodes = nodes;
+      fullLinks = links;
+
       const maxCount = Math.max(...nodes.map(n => n.count));
       const maxSize = 6 + maxCount * 1.5;
       const maxDiameter = maxSize * 2;
       const padding = 5;
 
+      // Initial count display
       countCampus.textContent = nodes.filter(n => n.group === 'campus').length;
       countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
       countActivities.textContent = activitySet.size;
@@ -170,80 +174,59 @@
           const emissive = node.group === 'campus' ? 0x2A0D05 : 0x000022;
 
           const material = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: 0.3 });
-          material.transparent = true;
-          material.opacity = 1;
-
           const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 16, 16), material);
+
           const label = new SpriteText(node.id);
           label.color = 'black';
           label.textHeight = 4;
           label.position.y = size + 2;
           mesh.add(label);
 
-          node.__threeObj = mesh;
           return mesh;
         })
         .linkWidth(4)
         .linkColor(() => '#444444')
         .nodeLabel(node => node.id)
         .backgroundColor('#fff')
+
         .onNodeClick(node => {
-          highlightedNode = node;
-          const relatedNodes = new Set();
-          const relatedLinks = new Set();
-
-          relatedNodes.add(node.id);
-          links.forEach(link => {
-            const source = typeof link.source === 'object' ? link.source.id : link.source;
-            const target = typeof link.target === 'object' ? link.target.id : link.target;
-            if (source === node.id || target === node.id) {
-              relatedLinks.add(link);
-              relatedNodes.add(source);
-              relatedNodes.add(target);
-            }
-          });
-
-          Graph.nodeThreeObject(nodeObj => {
-            const mesh = nodeObj.__threeObj;
-            if (mesh && mesh.material) {
-              mesh.material.opacity = relatedNodes.has(nodeObj.id) ? 1 : 0.1;
-            }
-            return mesh;
-          });
-
-          Graph.linkWidth(linkObj => relatedLinks.has(linkObj) ? 4 : 1);
-          Graph.linkOpacity(linkObj => relatedLinks.has(linkObj) ? 1 : 0.05);
-
           popup.style.display = 'block';
 
-          const relatedActivities = [...new Set(nodeLinks[node.id] || [])];
-          const connectedCampus = new Set();
-          const connectedCommunity = new Set();
-          const connectedActivities = new Set(nodeLinks[node.id] || []);
+          // Find all directly connected nodes (including clicked node)
+          const connectedNodes = new Set([node.id]);
+          const connectedLinks = [];
 
-          if (node.group === 'campus') connectedCampus.add(node.id);
-          if (node.group === 'community') connectedCommunity.add(node.id);
-
-          links.forEach(link => {
+          fullLinks.forEach(link => {
             const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
             const targetId = typeof link.target === 'object' ? link.target.id : link.target;
             if (sourceId === node.id || targetId === node.id) {
-              const otherId = sourceId === node.id ? targetId : sourceId;
-              const otherGroup = nodesMap[otherId]?.group;
-              if (otherGroup === 'campus') connectedCampus.add(otherId);
-              if (otherGroup === 'community') connectedCommunity.add(otherId);
+              connectedNodes.add(sourceId);
+              connectedNodes.add(targetId);
+              connectedLinks.push(link);
             }
           });
 
+          // Filter nodes to show only connected nodes
+          const filteredNodes = fullNodes.filter(n => connectedNodes.has(n.id));
+
+          // Count connected campus and community nodes
+          const connectedCampus = new Set(filteredNodes.filter(n => n.group === 'campus').map(n => n.id));
+          const connectedCommunity = new Set(filteredNodes.filter(n => n.group === 'community').map(n => n.id));
+
+          // Update count display
           countCampus.textContent = connectedCampus.size;
           countCommunity.textContent = connectedCommunity.size;
-          countActivities.textContent = connectedActivities.size;
 
+          // Activities related to node
+          const relatedActivities = [...new Set(nodeLinks[node.id] || [])];
+          countActivities.textContent = relatedActivities.length;
+
+          // Prepare popup content
           const activityHtml = relatedActivities.length
             ? '<ul>' + relatedActivities.sort().map(a => {
-                const meta = nodeMeta[a] || {};
-                return `<li><strong>${a}</strong><br/>Contact: ${meta.contact || 'N/A'}<br/>Email: ${meta.email || 'N/A'}</li>`;
-              }).join('') + '</ul>'
+              const meta = nodeMeta[a] || {};
+              return `<li><strong>${a}</strong><br/>Contact: ${meta.contact || 'N/A'}<br/>Email: ${meta.email || 'N/A'}</li>`;
+            }).join('') + '</ul>'
             : '<i>No connected activities</i>';
 
           const campusListHtml = connectedCampus.size
@@ -261,6 +244,10 @@
             <br/><strong>Community Partners:</strong><br/>${communityListHtml}
           `;
 
+          // Update graph data to only show filtered nodes and links
+          Graph.graphData({ nodes: filteredNodes, links: connectedLinks });
+
+          // Adjust camera to focus on clicked node
           const distance = 80;
           const distRatio = 1 + distance / Math.hypot(...Object.values(node.__threeObj.position));
           Graph.cameraPosition(
@@ -273,24 +260,17 @@
             1500
           );
         })
+
         .onBackgroundClick(() => {
-          highlightedNode = null;
-
-          Graph.nodeThreeObject(nodeObj => {
-            const mesh = nodeObj.__threeObj;
-            if (mesh && mesh.material) {
-              mesh.material.opacity = 1;
-            }
-            return mesh;
-          });
-
-          Graph.linkWidth(() => 4);
-          Graph.linkOpacity(() => 1);
-
           popup.style.display = 'none';
-          countCampus.textContent = nodes.filter(n => n.group === 'campus').length;
-          countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
+
+          // Restore full counts
+          countCampus.textContent = fullNodes.filter(n => n.group === 'campus').length;
+          countCommunity.textContent = fullNodes.filter(n => n.group === 'community').length;
           countActivities.textContent = activitySet.size;
+
+          // Restore full graph data
+          Graph.graphData({ nodes: fullNodes, links: fullLinks });
         });
 
       Graph.d3Force('link').distance(() => maxDiameter + padding + 20);
