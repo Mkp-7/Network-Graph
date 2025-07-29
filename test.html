@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Network Graph</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background-color: #fff;
+      font-family: Arial, sans-serif;
+    }
+    #graph-container {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #popup {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.95);
+      border: 2px solid #8B0A20;
+      border-radius: 8px;
+      color: white;
+      padding: 12px;
+      max-width: 320px;
+      font-size: 14px;
+      display: none;
+      z-index: 9999;
+    }
+    #popup h3 {
+      margin: 0 0 6px 0;
+      color: #8B0A20;
+      font-size: 16px;
+      border-bottom: 1px solid #8B0A20;
+      padding-bottom: 4px;
+    }
+    #popup ul {
+      margin: 5px 0 0 15px;
+      padding: 0;
+      list-style-type: disc;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #legend {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      z-index: 9999;
+    }
+    .legend-color {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    #count-card {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 6px;
+      font-size: 13px;
+      z-index: 9999;
+      line-height: 1.5;
+    }
+  </style>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+<div id="graph-container"></div>
+
+<div id="popup">
+  <h3 id="popup-title"></h3>
+  <div id="popup-content"></div>
+</div>
+
+<div id="legend">
+  <div><span class="legend-color" style="background:#8B0A20;"></span> Campus Units</div>
+  <div><span class="legend-color" style="background:#0D326E;"></span> Community Partners</div>
+</div>
+
+<div id="count-card">
+  <div><strong>Campus Units:</strong> <span id="count-campus">0</span></div>
+  <div><strong>Community Partners:</strong> <span id="count-community">0</span></div>
+  <div><strong>Activities:</strong> <span id="count-activities">0</span></div>
+</div>
+
+<script src="https://unpkg.com/three@0.137.5/build/three.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph"></script>
+<script src="https://unpkg.com/three-spritetext"></script>
+
+<script>
+  const popup = document.getElementById('popup');
+  const popupTitle = document.getElementById('popup-title');
+  const popupContent = document.getElementById('popup-content');
+
+  const countCampus = document.getElementById('count-campus');
+  const countCommunity = document.getElementById('count-community');
+  const countActivities = document.getElementById('count-activities');
+
+  let highlightedNode = null;
+
+  fetch('data.json')
+    .then(res => res.json())
+    .then(data => {
+      const nodesMap = {}, links = [], nodeLinks = {}, nodeMeta = {};
+      const activitySet = new Set();
+
+      data.forEach(row => {
+        const activity = row.activity_name?.trim();
+        if (!activity) return;
+        activitySet.add(activity);
+
+        nodeMeta[activity] = {
+          contact: row.primary_contact?.trim(),
+          email: row.primary_contact_email?.trim()
+        };
+
+        const campusList = row.campus_partners ? row.campus_partners.split(',').map(x => x.trim()) : [];
+        const communityList = row.community_organizations ? row.community_organizations.split(',').map(x => x.trim()) : [];
+
+        campusList.forEach(partner => {
+          if (!nodesMap[partner]) nodesMap[partner] = { id: partner, group: 'campus', count: 0 };
+          nodesMap[partner].count++;
+          nodeLinks[partner] = (nodeLinks[partner] || []).concat(activity);
+        });
+
+        communityList.forEach(org => {
+          if (!nodesMap[org]) nodesMap[org] = { id: org, group: 'community', count: 0 };
+          nodesMap[org].count++;
+          nodeLinks[org] = (nodeLinks[org] || []).concat(activity);
+        });
+
+        campusList.forEach(cp => {
+          communityList.forEach(co => {
+            links.push({ source: cp, target: co });
+          });
+        });
+      });
+
+      const nodes = Object.values(nodesMap);
+      const maxCount = Math.max(...nodes.map(n => n.count));
+      const maxSize = 6 + maxCount * 1.5;
+      const maxDiameter = maxSize * 2;
+      const padding = 5;
+
+      countCampus.textContent = nodes.filter(n => n.group === 'campus').length;
+      countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
+      countActivities.textContent = activitySet.size;
+
+      const Graph = ForceGraph3D()(document.getElementById('graph-container'))
+        .graphData({ nodes, links })
+        .nodeRelSize(6)
+        .nodeThreeObjectExtend(true)
+        .nodeThreeObject(node => {
+          const size = 6 + (node.count || 1) * 1.5;
+          const color = node.group === 'campus' ? 0x800000 : 0x0D326E;
+          const emissive = node.group === 'campus' ? 0x2A0D05 : 0x000022;
+
+          const material = new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity: 0.3 });
+          material.transparent = true;
+          material.opacity = 1;
+
+          const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 16, 16), material);
+          const label = new SpriteText(node.id);
+          label.color = 'black';
+          label.textHeight = 4;
+          label.position.y = size + 2;
+          mesh.add(label);
+
+          node.__threeObj = mesh;
+          return mesh;
+        })
+        .linkWidth(4)
+        .linkColor(() => '#444444')
+        .nodeLabel(node => node.id)
+        .backgroundColor('#fff')
+        .onNodeClick(node => {
+          highlightedNode = node;
+          const relatedNodes = new Set();
+          const relatedLinks = new Set();
+
+          relatedNodes.add(node.id);
+          links.forEach(link => {
+            const source = typeof link.source === 'object' ? link.source.id : link.source;
+            const target = typeof link.target === 'object' ? link.target.id : link.target;
+            if (source === node.id || target === node.id) {
+              relatedLinks.add(link);
+              relatedNodes.add(source);
+              relatedNodes.add(target);
+            }
+          });
+
+          Graph.nodeThreeObject(nodeObj => {
+            const mesh = nodeObj.__threeObj;
+            if (mesh && mesh.material) {
+              mesh.material.opacity = relatedNodes.has(nodeObj.id) ? 1 : 0.1;
+            }
+            return mesh;
+          });
+
+          Graph.linkWidth(linkObj => relatedLinks.has(linkObj) ? 4 : 1);
+          Graph.linkOpacity(linkObj => relatedLinks.has(linkObj) ? 1 : 0.05);
+
+          popup.style.display = 'block';
+
+          const relatedActivities = [...new Set(nodeLinks[node.id] || [])];
+          const connectedCampus = new Set();
+          const connectedCommunity = new Set();
+          const connectedActivities = new Set(nodeLinks[node.id] || []);
+
+          if (node.group === 'campus') connectedCampus.add(node.id);
+          if (node.group === 'community') connectedCommunity.add(node.id);
+
+          links.forEach(link => {
+            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+            if (sourceId === node.id || targetId === node.id) {
+              const otherId = sourceId === node.id ? targetId : sourceId;
+              const otherGroup = nodesMap[otherId]?.group;
+              if (otherGroup === 'campus') connectedCampus.add(otherId);
+              if (otherGroup === 'community') connectedCommunity.add(otherId);
+            }
+          });
+
+          countCampus.textContent = connectedCampus.size;
+          countCommunity.textContent = connectedCommunity.size;
+          countActivities.textContent = connectedActivities.size;
+
+          const activityHtml = relatedActivities.length
+            ? '<ul>' + relatedActivities.sort().map(a => {
+                const meta = nodeMeta[a] || {};
+                return `<li><strong>${a}</strong><br/>Contact: ${meta.contact || 'N/A'}<br/>Email: ${meta.email || 'N/A'}</li>`;
+              }).join('') + '</ul>'
+            : '<i>No connected activities</i>';
+
+          const campusListHtml = connectedCampus.size
+            ? '<ul>' + [...connectedCampus].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
+            : '<i>No connected campus units</i>';
+
+          const communityListHtml = connectedCommunity.size
+            ? '<ul>' + [...connectedCommunity].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
+            : '<i>No connected community partners</i>';
+
+          popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Units' : 'Community Partners'})`;
+          popupContent.innerHTML = `
+            <strong>Activities:</strong><br/>${activityHtml}
+            <br/><strong>Campus Units:</strong><br/>${campusListHtml}
+            <br/><strong>Community Partners:</strong><br/>${communityListHtml}
+          `;
+
+          const distance = 80;
+          const distRatio = 1 + distance / Math.hypot(...Object.values(node.__threeObj.position));
+          Graph.cameraPosition(
+            {
+              x: node.__threeObj.position.x * distRatio,
+              y: node.__threeObj.position.y * distRatio,
+              z: node.__threeObj.position.z * distRatio
+            },
+            node.__threeObj.position,
+            1500
+          );
+        })
+        .onBackgroundClick(() => {
+          highlightedNode = null;
+
+          Graph.nodeThreeObject(nodeObj => {
+            const mesh = nodeObj.__threeObj;
+            if (mesh && mesh.material) {
+              mesh.material.opacity = 1;
+            }
+            return mesh;
+          });
+
+          Graph.linkWidth(() => 4);
+          Graph.linkOpacity(() => 1);
+
+          popup.style.display = 'none';
+          countCampus.textContent = nodes.filter(n => n.group === 'campus').length;
+          countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
+          countActivities.textContent = activitySet.size;
+        });
+
+      Graph.d3Force('link').distance(() => maxDiameter + padding + 20);
+      Graph.d3Force('collide', d3.forceCollide(node => 6 + (node.count || 1) * 1.5 + 5));
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+      const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+      directional.position.set(1, 1, 1);
+      Graph.scene().add(ambient);
+      Graph.scene().add(directional);
+    })
+    .catch(err => {
+      document.body.innerHTML = `<h2 style="color:red;">Failed to load data.json</h2><p>${err}</p>`;
+    });
+</script>
+</body>
+</html>
