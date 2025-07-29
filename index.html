@@ -110,6 +110,9 @@
   const countCommunity = document.getElementById('count-community');
   const countActivities = document.getElementById('count-activities');
 
+  let fullNodes = [], fullLinks = [];
+  let Graph;
+
   fetch('data.json')
     .then(res => res.json())
     .then(data => {
@@ -149,6 +152,9 @@
       });
 
       const nodes = Object.values(nodesMap);
+      fullNodes = nodes;
+      fullLinks = links;
+
       const maxCount = Math.max(...nodes.map(n => n.count));
       const maxSize = 6 + maxCount * 1.5;
       const maxDiameter = maxSize * 2;
@@ -159,7 +165,7 @@
       countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
       countActivities.textContent = activitySet.size;
 
-      const Graph = ForceGraph3D()(document.getElementById('graph-container'))
+      Graph = ForceGraph3D()(document.getElementById('graph-container'))
         .graphData({ nodes, links })
         .nodeRelSize(6)
         .nodeThreeObjectExtend(true)
@@ -180,78 +186,136 @@
           return mesh;
         })
         .linkWidth(4)
-        .linkColor(() => '#444444')
+        .linkColor(link => (link._highlighted ? '#222222' : '#444444'))
         .nodeLabel(node => node.id)
-        .backgroundColor('#fff')
-        .onNodeClick(node => {
-          popup.style.display = 'block';
+        .backgroundColor('#fff');
 
-          const relatedActivities = [...new Set(nodeLinks[node.id] || [])];
-          const connectedCampus = new Set();
-          const connectedCommunity = new Set();
-          const connectedActivities = new Set(nodeLinks[node.id] || []);
+      // Zoom slider config
+      const sliderMin = 500;   // closest zoom in (small z)
+      const sliderMax = 2500;  // farthest zoom out (big z)
+      const initialZoom = 1500; // initial camera zoom (zoomed out)
 
-          if (node.group === 'campus') connectedCampus.add(node.id);
-          if (node.group === 'community') connectedCommunity.add(node.id);
+      // Create zoom slider (normal, no rotation)
+      const zoomSlider = document.createElement('input');
+      zoomSlider.type = 'range';
+      zoomSlider.min = sliderMin;
+      zoomSlider.max = sliderMax;
+      // Set slider value so left = zoomed out (z=1500)
+      zoomSlider.value = sliderMax + sliderMin - initialZoom;
 
-          links.forEach(link => {
-            const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-            const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      zoomSlider.style.position = 'fixed';
+      zoomSlider.style.bottom = '20px';
+      zoomSlider.style.right = '20px';
+      zoomSlider.style.zIndex = '10000';
+      zoomSlider.title = 'Zoom slider';
+      document.body.appendChild(zoomSlider);
 
-            if (sourceId === node.id || targetId === node.id) {
-              const otherId = sourceId === node.id ? targetId : sourceId;
-              const otherGroup = nodesMap[otherId]?.group;
-              if (otherGroup === 'campus') connectedCampus.add(otherId);
-              if (otherGroup === 'community') connectedCommunity.add(otherId);
-            }
-          });
+      // Map slider value to camera z (invert mapping so sliding right zooms in)
+      function sliderToCameraZ(value) {
+        return sliderMax + sliderMin - value;
+      }
+      function cameraZToSlider(z) {
+        return sliderMax + sliderMin - z;
+      }
 
-          countCampus.textContent = connectedCampus.size;
-          countCommunity.textContent = connectedCommunity.size;
-          countActivities.textContent = connectedActivities.size;
+      // When slider moves, update camera zoom
+      zoomSlider.addEventListener('input', () => {
+        const cameraZ = sliderToCameraZ(Number(zoomSlider.value));
+        Graph.cameraPosition({ x: 0, y: 0, z: cameraZ });
+      });
 
-	  const activityHtml = relatedActivities.length
-  ? '<ul>' + relatedActivities.sort().map(a => {
-          const meta = nodeMeta[a] || {};
-      return `<li><strong>${a}</strong><br/>Contact: ${meta.contact || 'N/A'}<br/>Email: ${meta.email || 'N/A'}</li>`;
-    }).join('') + '</ul>'
-  : '<i>No connected activities</i>';
+      // Sync slider with manual zoom changes (wheel, drag)
+      const camera = Graph.camera();
+      function updateSliderFromCamera() {
+        let z = camera.position.z;
+        if (z < sliderMin) z = sliderMin;
+        else if (z > sliderMax) z = sliderMax;
+        zoomSlider.value = cameraZToSlider(z);
+      }
+      function animate() {
+        updateSliderFromCamera();
+        requestAnimationFrame(animate);
+      }
+      animate();
 
-	  const campusListHtml = connectedCampus.size
-  ? '<ul>' + [...connectedCampus].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
-  : '<i>No connected campus units</i>';
+      // Set initial camera zoom
+      Graph.cameraPosition({ x: 0, y: 0, z: initialZoom });
 
-	  const communityListHtml = connectedCommunity.size
-  ? '<ul>' + [...connectedCommunity].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
-  : '<i>No connected community partners</i>';
+      // Event handlers:
 
+      Graph.onNodeClick(node => {
+        popup.style.display = 'block';
 
+        const connectedNodes = new Set([node.id]);
+        const connectedLinks = [];
 
-          popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Units' : 'Community Partners'})`;
-          popupContent.innerHTML = `
-            <strong>Activities:</strong><br/>${activityHtml}
-            <br/><strong>Campus Units:</strong><br/>${campusListHtml}
-            <br/><strong>Community Partners:</strong><br/>${communityListHtml}
-          `;
-
-          const distance = 80;
-          const distRatio = 1 + distance / Math.hypot(...Object.values(node.__threeObj.position));
-          Graph.cameraPosition(
-            {
-              x: node.__threeObj.position.x * distRatio,
-              y: node.__threeObj.position.y * distRatio,
-              z: node.__threeObj.position.z * distRatio
-            },
-            node.__threeObj.position,
-            1500
-          );
-        })
-        .onBackgroundClick(() => {
-          popup.style.display = 'none';
-          countCampus.textContent = nodes.filter(n => n.group === 'campus').length;
-          countCommunity.textContent = nodes.filter(n => n.group === 'community').length;
-          countActivities.textContent = activitySet.size;
+        fullLinks.forEach(link => {
+          const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+          const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+          if (sourceId === node.id || targetId === node.id) {
+            connectedNodes.add(sourceId);
+            connectedNodes.add(targetId);
+            connectedLinks.push(link);
+          }
         });
+
+        const filteredNodes = fullNodes.filter(n => connectedNodes.has(n.id));
+
+        const connectedCampus = new Set(filteredNodes.filter(n => n.group === 'campus').map(n => n.id));
+        const connectedCommunity = new Set(filteredNodes.filter(n => n.group === 'community').map(n => n.id));
+
+        countCampus.textContent = connectedCampus.size;
+        countCommunity.textContent = connectedCommunity.size;
+
+        const relatedActivities = [...new Set(nodeLinks[node.id] || [])];
+        countActivities.textContent = relatedActivities.length;
+
+        const activityHtml = relatedActivities.length
+          ? '<ul>' + relatedActivities.sort().map(a => {
+            const meta = nodeMeta[a] || {};
+            return `<li><strong>${a}</strong><br/>Contact: ${meta.contact || 'N/A'}<br/>Email: ${meta.email || 'N/A'}</li>`;
+          }).join('') + '</ul>'
+          : '<i>No connected activities</i>';
+
+        const campusListHtml = connectedCampus.size
+          ? '<ul>' + [...connectedCampus].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
+          : '<i>No connected campus units</i>';
+
+        const communityListHtml = connectedCommunity.size
+          ? '<ul>' + [...connectedCommunity].sort().map(id => `<li>${id}</li>`).join('') + '</ul>'
+          : '<i>No connected community partners</i>';
+
+        popupTitle.textContent = `${node.id} (${node.group === 'campus' ? 'Campus Units' : 'Community Partners'})`;
+        popupContent.innerHTML = `
+          <strong>Activities:</strong><br/>${activityHtml}
+          <br/><strong>Campus Units:</strong><br/>${campusListHtml}
+          <br/><strong>Community Partners:</strong><br/>${communityListHtml}
+        `;
+
+        fullLinks.forEach(link => {
+          const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+          const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+          link._highlighted = (sourceId === node.id || targetId === node.id);
+        });
+
+        Graph.graphData({ nodes: filteredNodes, links: connectedLinks });
+        Graph.linkColor(Graph.linkColor());
+      });
+
+      Graph.onBackgroundClick(() => {
+        popup.style.display = 'none';
+
+        countCampus.textContent = fullNodes.filter(n => n.group === 'campus').length;
+        countCommunity.textContent = fullNodes.filter(n => n.group === 'community').length;
+        countActivities.textContent = activitySet.size;
+
+        fullLinks.forEach(link => {
+          link._highlighted = false;
+        });
+
+        Graph.graphData({ nodes: fullNodes, links: fullLinks });
+        Graph.linkColor(Graph.linkColor());
+      });
 
       Graph.d3Force('link').distance(() => maxDiameter + padding + 20);
       Graph.d3Force('collide', d3.forceCollide(node => 6 + (node.count || 1) * 1.5 + 5));
